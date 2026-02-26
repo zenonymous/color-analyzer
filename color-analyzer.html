@@ -2000,6 +2000,151 @@
     .layer-swatch { width: 28px; height: 28px; }
     .layer-reason { font-size: 7px; padding: 2px 5px; }
   }
+
+  /* ─── Hamburger button + mobile drawer ─── */
+  .mobile-menu-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 20px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .mobile-drawer {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 999;
+    background: var(--bg);
+    border-bottom: 2px solid var(--accent);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    flex-direction: column;
+    gap: 0;
+    overflow: hidden;
+    max-height: 0;
+    transition: max-height 0.3s ease;
+  }
+  .mobile-drawer.open { max-height: 400px; }
+  .mobile-drawer-btn {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1rem;
+    letter-spacing: 2px;
+    cursor: pointer;
+    text-align: left;
+    min-height: 52px;
+    transition: background 0.15s;
+  }
+  .mobile-drawer-btn:last-child { border-bottom: none; }
+  .mobile-drawer-btn:active { background: var(--surface); }
+  .mobile-drawer-btn:disabled { opacity: 0.35; pointer-events: none; }
+  .mobile-drawer-btn svg { flex-shrink: 0; opacity: 0.7; }
+  .mobile-drawer-btn.accent { color: var(--accent); }
+  .mobile-drawer-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 998;
+    background: rgba(0,0,0,0.5);
+  }
+  .mobile-drawer-overlay.open { display: block; }
+
+  /* Select: mobile-friendly with custom chevron */
+  @media (max-width: 700px) {
+    #paint-line {
+      -webkit-appearance: none;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 32px;
+      width: 100%;
+      font-size: 0.9rem;
+    }
+    /* Prevent iOS zoom on focus for inputs */
+    input[type=text], input[type=number], select, textarea { font-size: 16px !important; }
+    /* Fallback chips: horizontal scroll on mobile */
+    .fallback-chips {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      padding-bottom: 4px;
+      scrollbar-width: none;
+    }
+    .fallback-chips::-webkit-scrollbar { display: none; }
+    .fallback-chip { flex-shrink: 0; }
+    /* Show hamburger, hide desktop header actions */
+    .mobile-menu-btn { display: flex; }
+    .header-actions { display: none !important; }
+    .mobile-drawer { display: flex; }
+    /* Bottom-sheet modals */
+    .modal-backdrop { align-items: flex-end; }
+    .modal-box {
+      width: 100% !important;
+      max-width: 100% !important;
+      border-radius: 0;
+      border-left: none;
+      border-right: none;
+      border-bottom: none;
+      margin: 0;
+      padding: 24px 20px 36px;
+      animation: slideUp 0.25s ease;
+    }
+    @keyframes slideUp {
+      from { transform: translateY(100%); }
+      to   { transform: translateY(0); }
+    }
+    #session-name-input { font-size: 16px; }
+    /* Lock picker: bottom sheet on mobile */
+    #lock-picker {
+      position: fixed !important;
+      top: auto !important;
+      bottom: 0 !important;
+      left: 0 !important;
+      right: 0 !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      max-height: 75vh !important;
+      border-radius: 0 !important;
+      transform: none !important;
+      border-left: none !important;
+      border-right: none !important;
+      border-bottom: none !important;
+    }
+    .lock-picker-grid { grid-template-columns: repeat(auto-fill, 38px); gap: 5px; }
+    /* Toast: full-width on mobile */
+    .toast {
+      left: 12px !important;
+      right: 12px !important;
+      bottom: 16px !important;
+      transform: none !important;
+      text-align: center;
+      max-width: 100% !important;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .card-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .card-action-btn { justify-content: center; }
+    .swatch-pair { width: 44px; }
+    .swatch-top, .swatch-bot { height: 44px; }
+  }
 </style>
 </head>
 <body>
@@ -2037,7 +2182,30 @@
     </div>
     <input type="file" id="session-load-input" accept=".json" style="display:none;">
     <input type="file" id="compare-load-input" accept=".json" style="display:none;">
+    <!-- Hamburger button (mobile only) -->
+    <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Menu">☰</button>
   </header>
+
+  <!-- Mobile drawer (slides down from top) -->
+  <div class="mobile-drawer-overlay" id="mobile-drawer-overlay"></div>
+  <div class="mobile-drawer" id="mobile-drawer">
+    <button class="mobile-drawer-btn" id="mob-save-compare-btn" disabled>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+      SAVE FOR COMPARE
+    </button>
+    <button class="mobile-drawer-btn" id="mob-save-session-btn" disabled>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      SAVE SESSION
+    </button>
+    <button class="mobile-drawer-btn" id="mob-export-btn" disabled>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      EXPORT CSV
+    </button>
+    <button class="mobile-drawer-btn" id="mob-reset-btn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.95"/></svg>
+      NEW IMAGE
+    </button>
+  </div>
 
   <!-- Upload -->
   <input type="file" id="file-input" accept="image/*">
@@ -4181,6 +4349,7 @@ function loadSessionFromJSON(data) {
   // Show the UI without re-running analysis
   uploadArea.style.display = 'none';
   headerActions.style.display = 'flex';
+  syncMobileDrawer(true);
   previewSection.classList.add('visible');
   renderPlaceholder.style.display = 'flex';
   renderInnerEl.style.display = 'none';
@@ -4855,6 +5024,7 @@ function handleFile(file) {
     imageMeta.textContent = `${previewImg.naturalWidth} × ${previewImg.naturalHeight}`;
     uploadArea.style.display = 'none';
     headerActions.style.display = 'flex';
+    syncMobileDrawer(true);
     previewSection.classList.add('visible');
     runFullAnalysis();
   };
@@ -5240,7 +5410,54 @@ function reset() {
   layerOrderSteps.innerHTML = '';
   wallCansVal.textContent = '—';
   wallCansList.innerHTML = 'Run analysis first';
+  closeMobileDrawer();
+  syncMobileDrawer(false);
 }
+
+// ─── Mobile hamburger menu ────────────────────────────────────────────────────
+const mobileMenuBtn      = document.getElementById('mobile-menu-btn');
+const mobileDrawer       = document.getElementById('mobile-drawer');
+const mobileDrawerOverlay = document.getElementById('mobile-drawer-overlay');
+const mobSaveCompareBtn  = document.getElementById('mob-save-compare-btn');
+const mobSaveSessionBtn  = document.getElementById('mob-save-session-btn');
+const mobExportBtn       = document.getElementById('mob-export-btn');
+const mobResetBtn        = document.getElementById('mob-reset-btn');
+
+function openMobileDrawer() {
+  mobileDrawer.classList.add('open');
+  mobileDrawerOverlay.classList.add('open');
+}
+function closeMobileDrawer() {
+  mobileDrawer.classList.remove('open');
+  mobileDrawerOverlay.classList.remove('open');
+}
+function syncMobileDrawer(hasAnalysis) {
+  mobSaveCompareBtn.disabled = !hasAnalysis;
+  mobSaveSessionBtn.disabled = !hasAnalysis;
+  mobExportBtn.disabled      = !hasAnalysis;
+}
+
+mobileMenuBtn.addEventListener('click', () => {
+  mobileDrawer.classList.contains('open') ? closeMobileDrawer() : openMobileDrawer();
+});
+mobileDrawerOverlay.addEventListener('click', closeMobileDrawer);
+
+mobSaveCompareBtn.addEventListener('click', () => {
+  closeMobileDrawer();
+  document.getElementById('save-compare-btn').click();
+});
+mobSaveSessionBtn.addEventListener('click', () => {
+  closeMobileDrawer();
+  document.getElementById('save-session-btn').click();
+});
+mobExportBtn.addEventListener('click', () => {
+  closeMobileDrawer();
+  document.getElementById('export-btn').click();
+});
+mobResetBtn.addEventListener('click', () => {
+  closeMobileDrawer();
+  reset();
+});
 </script>
 </body>
 </html>
