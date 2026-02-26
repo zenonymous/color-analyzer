@@ -2144,6 +2144,59 @@
     .card-action-btn { justify-content: center; }
     .swatch-pair { width: 44px; }
     .swatch-top, .swatch-bot { height: 44px; }
+
+    /* ── Kill the wasted space between render and results ── */
+
+    /* 1. Hide source image panel entirely — render is right there */
+    #preview-section .panel:first-child { display: none; }
+
+    /* 2. Reduce section gap */
+    #preview-section { margin-bottom: 8px !important; }
+
+    /* 3. Compact render panel header: everything in two tight rows */
+    .render-panel-header {
+      padding: 8px 10px;
+      gap: 6px;
+    }
+    .panel-label.render-label { display: none; } /* label redundant on mobile */
+    .render-header-controls {
+      width: 100%;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      grid-template-rows: auto auto;
+      gap: 6px;
+      align-items: center;
+    }
+    .render-toolbar {
+      grid-column: 1;
+      grid-row: 1;
+    }
+    .render-block-ctrl {
+      grid-column: 2;
+      grid-row: 1;
+      border-left: none;
+      padding-left: 0;
+      margin-left: 0;
+    }
+    .render-block-ctrl input[type=range] { width: 100%; max-width: none; }
+    .render-mode-toggle {
+      grid-column: 1 / -1;
+      grid-row: 2;
+      width: 100%;
+    }
+    .mode-btn {
+      flex: 1;
+      text-align: center;
+      padding: 0 4px;
+      font-size: 0.68rem;
+      height: 36px;
+    }
+    .render-viewport { height: 200px; }
+  }
+
+  /* Also tighten at 700px (phones in landscape / larger phones) */
+  @media (max-width: 700px) {
+    #preview-section { margin-bottom: 12px; }
   }
 </style>
 </head>
