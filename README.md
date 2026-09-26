@@ -277,3 +277,9 @@ The Palette PDF export requires pop-ups to be allowed for the page. The SVG Sten
 The entire tool ships as a single `.html` file with no external dependencies except the Google Fonts import for Bebas Neue and Space Mono. It can be opened directly from a local filesystem, hosted on any static server, or shared as an email attachment.
 
 Session files (`.json`) are plain text and can be opened and inspected in any text editor.
+
+---
+
+## For Developers
+
+See [`AGENTS.md`](AGENTS.md) for a codebase orientation, and the [`docs/`](docs/) folder for architecture, data formats, palette maintenance, development/QA, and known issues.
