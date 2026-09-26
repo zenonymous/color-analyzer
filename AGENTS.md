@@ -4,66 +4,84 @@ Orientation for AI coding agents (and humans) picking up this repo. Read this fi
 
 ## What this is
 
-A **single-file, zero-build, client-side web app** (`color-analyzer.html`) for graffiti / mural artists. The user drops in an image; the app:
+A **single-file, zero-build, client-side web app** (`color-analyzer.html`) for graffiti and mural artists, hosted on **GitHub Pages** and shared with other artists. The user drops in an image. The app:
 
-1. Samples pixels and clusters them with **k-means** (RGB space) into N colours.
-2. Matches each cluster to the nearest **real spray-paint can** in a chosen catalogue (Montana, MTN, Molotow, Loop — 9 lines, 1,336 colours) using **CIE76 ΔE** in Lab space, with optional fallback lines.
-3. Shows a re-rendered preview (pixel / vector / spray-simulation / before-after compare), a card per colour, a can-count estimate, a wall-size calculator, a light-to-dark spray order, and exports (CSV shopping list, printable palette "PDF", per-colour SVG stencils, JSON session files).
+1. Downscales it to ≤ 1600 px, samples ≤ 60k opaque pixels, and clusters them with **seeded k-means in CIE Lab** (in a Web Worker).
+2. Matches each cluster to the nearest **real spray-paint can** in a chosen catalogue (Montana, MTN, Molotow, Loop: 9 lines, 1,335 colours) using **CIEDE2000**, with optional fallback lines.
+3. Shows a re-rendered preview (pixel / vector / spray simulation / before-after compare), a card per colour, a wall-based can calculator, a light-to-dark spray order, and exports: a CSV shopping list (one row per paint), a printable palette "PDF", per-paint SVG stencils, and JSON session files (optionally with the image embedded).
 
-No server, no framework, no dependencies, no build step, no tests. Only external request: Google Fonts (Bebas Neue, Space Mono).
+The app has no server, no framework, no runtime dependencies and no build step. Its only external request is Google Fonts. `package.json` exists only for **dev tooling** (tests).
 
-`README.md` is the **end-user** manual. `docs/` is for developers/agents.
+`README.md` is the **end-user** manual. `docs/` is for developers and agents.
+
+## Owner decisions (don't relitigate)
+
+- **Stays a single self-contained HTML file.** No bundler or build step. Multiple `<script>` blocks inside the file are fine.
+- Catalogue data was **scraped and verified** by the owner. Don't "correct" hex values or invent product codes; lines without codes are identified by name.
+- Hosting: GitHub Pages only.
 
 ## Repo layout
 
 ```
-color-analyzer.html   ~5.5k lines: CSS (1–2201), HTML markup (2203–2544), JS (2545–5514)
-README.md             End-user feature guide
-AGENTS.md             This file
-CLAUDE.md             Imports this file (for Claude Code)
+color-analyzer.html        The app. CSS → markup → 3 script blocks (see below)
+README.md                  End-user feature guide
+AGENTS.md / CLAUDE.md      This file (CLAUDE.md imports it)
 docs/
-  ARCHITECTURE.md     Code map, pipeline, state, render modes, event wiring
-  DATA_MODEL.md       Cluster/result objects, session JSON schema, compare snapshot
-  PALETTES.md         Catalogue format, how to add/edit a paint line, data-quality notes
-  DEVELOPMENT.md      Running, manual QA checklist, headless smoke test recipe
-  KNOWN_ISSUES.md     Verified bugs, README/code mismatches, tech debt
+  ARCHITECTURE.md          Code map, pipeline, state, render modes, event wiring
+  DATA_MODEL.md            Paint/cluster/result objects, session JSON schema (v1 + v2)
+  PALETTES.md              Catalogue format, how to add/edit a paint line, data notes
+  DEVELOPMENT.md           Running, tests, CI, manual QA checklist
+  KNOWN_ISSUES.md          Remaining issues and tech debt; changelog of fixed ones
+tests/
+  load-core.mjs            Extracts the pure script blocks from the HTML into a vm sandbox
+  core.test.mjs            Unit tests (colour maths, CIEDE2000, k-means, palettes…)
+  e2e.test.mjs             Playwright browser tests against the real page
+package.json               Dev only: `npm test`
+.github/workflows/ci.yml   Runs `npm test` on every push / PR
 ```
 
-Line numbers above are approximate and drift. Navigate by the section banners instead — every section starts with a comment like `// ─── Core Logic ───` (JS) or `/* ─── Color cards ─── */` (CSS). `grep -n '─── ' color-analyzer.html` gives you the table of contents.
+### The three script blocks in `color-analyzer.html`
 
-## Running it
+| Block | Purpose | Rules |
+|---|---|---|
+| `<script id="core-lib">` | `const CA = {…}`: pure functions (colour conversion, CIEDE2000, seeded RNG, sampling, k-means, block merging, can estimates, aggregation, escaping, CSV). | **No DOM, no globals except `CA`.** It is copied into the analysis Web Worker at runtime and loaded by the unit tests. Anything testable goes here. |
+| `<script id="palette-data">` | The nine catalogue arrays plus `PALETTES` and `LINE_NAMES`. | Pure data. Also loaded by the unit tests. |
+| `<script>` (app) | Palette normalisation, state, DOM refs, UI and features. | Globals, DOM, event wiring. |
 
-Open `color-analyzer.html` in a browser. That's it. For local serving: `python3 -m http.server` and browse to `/color-analyzer.html`. See `docs/DEVELOPMENT.md` for a headless Playwright smoke test.
+Line numbers drift. Navigate by the section banners (`// ─── Name ───`, `/* ─── Name ─── */`): `grep -n '─── ' color-analyzer.html` is the table of contents.
 
-## Conventions to follow when editing
+## Running and testing
 
-- **Keep it a single self-contained HTML file** unless the owner explicitly agrees to change that (it's a stated feature: "open the file and go", shareable as an email attachment).
-- Plain ES2020+ JS in one global `<script>`; no modules, no frameworks. Functions and state are globals.
-- DOM refs are cached as `const` near the top of the script (`// ─── DOM refs ───`). Add new ones there.
-- UI is built with template-literal `innerHTML` for cards/tables and `createElement` for smaller bits. Match whichever the surrounding code uses.
-- Styling: CSS custom properties in `:root` (`--accent` red `#ff2d00`, `--accent2` yellow `#ffcc00`, `--good/--ok/--poor`). Headline font Bebas Neue, body Space Mono. Uppercase, letter-spaced, square corners (`--radius: 2px`). Mobile overrides live in the `@media` blocks under `/* ─── Responsive ─── */` and at the very end of the `<style>`.
-- Section banner comments (`// ─── Name ───…`) for new sections.
-- **Naming legacy:** the app started as Montana-BLACK-only, so many identifiers say "montana" even though they mean "the matched paint colour from any brand": `result.montana`, `findClosestMontana`, `renderMontanaImage`, `#montana-render-canvas`, session `_type: 'montana-session'`, file names `montana_session_*.json`, `montana-*-shopping-list.csv`. **Do not rename `_type` or session field names** without a migration — existing user session files depend on them.
+- Run: open `color-analyzer.html` in a browser, or `python3 -m http.server` and browse to `/color-analyzer.html`.
+- Test: `npm install && npm test` (Node 22+). The e2e tests need Chromium: `npx playwright install chromium`, or set `PW_CHROMIUM_PATH`. Details in `docs/DEVELOPMENT.md`.
+- **Every change must keep `npm test` green.** Add unit tests for new pure logic (put it in `core-lib`) and e2e tests for new user flows.
 
-## Key mental model (read before changing logic)
+## Conventions
+
+- Plain ES2020+ JS, no modules or frameworks. State and functions in the app block are globals. Tests reach into them via `page.evaluate`, so renaming a global can break tests.
+- DOM refs are cached as `const` in `// ─── DOM refs ───`. Add new ones there.
+- **Escape everything that comes from data** when building HTML: `esc()` (= `CA.escapeHtml`) for text, and only validated `#RRGGBB` values in `style`. Session files are shared between artists and are untrusted input; `sanitizeSession()` validates them.
+- Paints are identified by `paint.id` = `` `${line}|${code || name}` `` (non-enumerable, set at startup), **never by `code` alone**. Codes are empty for some lines.
+- Can counts come only from `cansFor(pct)` / `totalCans()` (wall calculator inputs). Shopping-list style outputs use `activePaints()` (excluded colours removed, clusters aggregated per paint).
+- Styling: CSS custom properties in `:root` (`--accent` red, `--accent2` yellow, `--good/--ok/--poor`). Bebas Neue headings, Space Mono body, uppercase with letter-spacing, square corners. Mobile overrides are in the `@media` blocks from `/* ─── Responsive ─── */` to the end of `<style>`. The **last** matching block wins.
+- **Naming legacy:** "montana" in identifiers means "the matched paint, any brand" (`result.montana`, `findClosestMontana`, `renderMontanaImage`, `#montana-render-canvas`). **Do not rename `_type: 'montana-session'` or session field names.** Users have saved files. Bump `_version` and migrate in `sanitizeSession()` instead.
+- Keep `README.md` in sync with user-visible behaviour, and `docs/` with structure and formats.
+
+## Key mental model
 
 ```
-image ─► samplePixels (every 6th px, alpha≥128)
-      ─► kMeans(k = Color Depth)             ─┐ runFullAnalysis()  (clears locks + excludes)
-      ─► drop clusters < Min Coverage, renormalise to 100%
-      ─► rawClusters                          ─┘
-rawClusters ─► per cluster: lock override OR findClosestMontana (primary line, then fallbacks if ΔE > threshold)
-            ─► analysisResult[]               ── rematch()  (keeps locks + excludes)
-analysisResult ─► renderResults / renderLayerOrder / calcWallCans / renderMontanaImage / renderDiffPanel
+image ─► loadImageSource: downscale ≤1600px onto hidden #analysis-canvas
+      ─► CA.samplePixels (≤60k opaque px, seeded)            ─┐ runFullAnalysis()
+      ─► Worker: CA.clusterSamples → kMeans in Lab (seeded)    │ (clears locks + excludes)
+      ─► drop < Min Coverage, renormalise → rawClusters        ─┘
+rawClusters ─► per cluster: lock override OR findClosestMontana (CIEDE2000; fallbacks if ΔE > threshold)
+            ─► analysisResult[]                                ── rematch() (keeps locks + excludes)
+analysisResult ─► activePaints() (drop excluded, merge same paint)
+               ─► cards / pills / wall calc / layer order / CSV / PDF / stencils / diff
+               ─► renderMontanaImage (blocks snapped to active paints, merged rects)
 ```
 
-- **Locks and exclusions are keyed by cluster index** (`lockedOverrides: Map<idx, paintColor>`, `excludedIndices: Set<idx>`). They are only valid for the current `rawClusters`; `runFullAnalysis()` clears them.
-- What triggers what: Paint Line / Match Quality / fallback chips / lock / exclude → `rematch()`. Color Depth / Min Coverage → need **ANALYZE** (`runFullAnalysis()`). Block size / render mode → `renderMontanaImage()` only.
-- The rendered preview does **not** reuse the k-means assignment: it averages each `blockSize × blockSize` block and snaps it to the nearest *matched paint* colour.
-- Percentages (`pct`) are stored as **strings** (from `toFixed(1)`) and `parseFloat`-ed everywhere. Keep that in mind; session files contain strings.
-
-## Before you change things
-
-- Check `docs/KNOWN_ISSUES.md` — several real bugs are already diagnosed there (e.g. flat-colour images hang the analysis; excluded colours still counted in wall calc; empty paint codes break the lock picker and diff).
-- There are no automated tests. After any change, run through the manual checklist in `docs/DEVELOPMENT.md` (or the Playwright smoke script there).
-- Keep `README.md` in sync when you change user-visible behaviour.
+- Locks and exclusions are keyed by **cluster index** and are valid only for the current `rawClusters`.
+- What triggers what: Paint Line / Match Quality / fallback chips / lock / exclude → `rematch()`. Color Depth / Min Coverage → **ANALYZE**. Block size / render mode → `renderMontanaImage()`. Wall inputs → wall calc, pills, card estimates.
+- `pct` is stored as a **string** with one decimal (historical format, also in sessions); use `parseFloat`. Aggregated `activePaints()[].pct` is a number.
+- `delta` is CIEDE2000 rounded to 0.1. Bands: < 5 close, < 10 fair. Match % = `100 − 4·ΔE`.

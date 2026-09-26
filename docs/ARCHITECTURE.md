@@ -1,109 +1,102 @@
 # Architecture
 
-Everything lives in `color-analyzer.html`. This document maps that file and explains how data flows through it. Line numbers are approximate; search for the `─── Section ───` banners.
+Everything ships in `color-analyzer.html`. This document maps that file and explains how data flows through it. Line numbers are approximate; search for the `─── Section ───` banners.
 
 ## File map
 
 | Region | ~Lines | Contents |
 |---|---|---|
-| `<style>` | 7–2201 | All CSS. Design tokens in `:root`. Section banners per component. Responsive rules from `/* ─── Responsive ─── */` (~1805) onward, including breakpoints at 900 / 700 / 540 / 480 px and `(pointer: coarse)`. Several later `@media (max-width: 700px)` blocks were appended by the mobile commits and override earlier ones — check the *last* matching block before editing mobile styles. |
-| `<body>` markup | 2203–2544 | Static DOM: header + mobile drawer, upload zone, controls bar, fallback bar, preview (source + render panels), loading spinner, results (wall calc, color grid, layer order, diff panel, export bar), session modal, lock picker. Hidden `<canvas id="analysis-canvas">` holds the full-res source image. |
-| Palette data | 2546–3940 | Nine `const` arrays of `{code, name, hex}`. See `PALETTES.md`. |
-| Palette registry | ~3941–3944 | `PALETTES`, `LINE_NAMES`, `getActivePalette()`, `getActiveLineName()`. |
-| Fallback chips | ~3946–3982 | `activeFallbackKeys`, `buildFallbackChips()`, `getActiveFallbackPalettes()`, `matchPctToDelta()`. |
-| Colour math | ~3984–4042 | `hexToRgb`, `rgbToHex`, `rgbToLab` (sRGB → XYZ D65 → Lab), `colorDistance` (CIE76), `findClosestMontana`. |
-| Clustering | ~4044–4110 | `samplePixels`, `kMeans` (k-means++ init, 20 iterations, RGB Euclidean). |
-| State | ~4112–4119 | Global `let` state (see below). |
-| DOM refs | ~4121–4203 | Cached `document.getElementById` constants. |
-| Features | ~4205–4990 | Lock picker, exclude/unlock, stencil export, session save/load, compare snapshot + diff panel, palette PDF, collapsible panels, wall calculator, layer order, compare (before/after) mode, toast, zoom, mouse pan, touch pinch/pan. |
-| Render mode buttons + event wiring | ~4991–5066 | |
-| Core logic | ~5068–5435 | `handleFile`, `runFullAnalysis`, `rematch`, `renderMontanaImage`, `renderMontanaSpray`, `renderMontanaVector`, `renderResults`, `exportCSV`. |
-| Reset + mobile drawer | ~5437–5513 | `reset()`, hamburger drawer open/close/sync. |
+| `<style>` | 7–2218 | All CSS. Design tokens in `:root`. Responsive rules from `/* ─── Responsive ─── */` onward (breakpoints 900 / 700 / 540 / 480 px, `pointer: coarse`). Several `@media (max-width: 700px)` blocks exist; the last one wins. |
+| `<body>` markup | 2220–2568 | Header + mobile drawer, upload zone, controls, fallback bar, preview (source + render panels incl. attach-image prompt), loading spinner, results (wall calc, cards, layer order, diff panel, export bar), session modal, lock picker. Hidden `<canvas id="analysis-canvas">` holds the downscaled source image. |
+| `<script id="core-lib">` | ~2570–2848 | `const CA`: pure library (see below). |
+| `<script id="palette-data">` | ~2850–4250 | Nine catalogue arrays, `PALETTES`, `LINE_NAMES`. |
+| `<script>` app | ~4252–end | Everything with DOM access. |
 
-## Global state
+### `CA` (core-lib) API
+
+| Function | Notes |
+|---|---|
+| `hexToRgb`, `rgbToHex`, `isHex` | 6-digit hex only. `rgbToHex` returns uppercase. |
+| `rgbToLab(r,g,b)` | sRGB D65 → CIE Lab (LUT for integer channels). |
+| `deltaE2000(lab1, lab2)`, `deltaE76` | CIEDE2000 verified against Sharma et al. reference data in tests. |
+| `deltaToMatchPct`, `matchPctToDelta`, `deltaRating`, `DE_CLOSE`, `DE_FAIR` | Match % = 100 − 4·ΔE; ratings good < 5 ≤ ok < 10 ≤ poor. |
+| `mulberry32(seed)` | Seeded PRNG used by sampling, k-means and the spray renderer. |
+| `samplePixels(rgba, max, seed)` | ≤ `max` opaque samples with jittered stride → `{rgbs, labs, n, hasAlpha}`. |
+| `kMeans(labs, rgbs, n, k, {iterations, seed})` | k-means++ in Lab with incremental min-distance and early stop on convergence. Stops seeding when all points coincide with centres, so flat images produce fewer clusters instead of crashing. Cluster `rgb` = mean RGB of members, `lab` = centroid. |
+| `clusterSamples({labs, rgbs, n, k, minPct, seed})` | k-means + min-coverage filter + renormalise. This is what the worker runs. |
+| `nearest(lab, colors)` | Nearest by CIEDE2000; `colors[i].lab` required. |
+| `mergeBlocks(blocks)` | Row-major `{bx,by,bw,bh,key}` → merged `{x,y,w,h,key}` rectangles (horizontal runs, then vertical stacking). |
+| `estimateCans(area, pct, coverage)` | `max(1, ceil(area·pct/100/coverage))`; 0 if no area. |
+| `aggregateByPaint(results, idOf)` | One entry per paint: summed pct, best ΔE, image hexes, cluster indices, fallback/locked flags. Sorted by pct. |
+| `escapeHtml`, `toCSV` | `toCSV` quotes fields per RFC 4180 and prepends a UTF-8 BOM. |
+
+## App block
+
+### Startup
+`// ─── Palette normalisation ───` walks every catalogue entry: uppercases `hex`, sets `line` (palette key), and defines non-enumerable `id` and `lab`. It fills `PAINT_BY_ID`. `resolvePaint()` maps a paint object from a session file back to a catalogue entry (by id, else by hex + name), or builds a sanitised stand-alone copy.
+
+### Global state
 
 ```js
-let currentFile        // File | null — the uploaded image
-let rawClusters        // Cluster[] | null — k-means output after min-coverage filter (see DATA_MODEL.md)
-let analysisResult     // Result[] | null — rawClusters + matched paint + flags
-let renderMode         // 'pixel' | 'vector' | 'spray'
-let compareMode        // boolean — before/after slider active (forces pixel render)
-let excludedIndices    // Set<number> — cluster indices hidden from render/exports
-let lockedOverrides    // Map<number, PaintColor> — cluster index → user-chosen paint
-let lastBlocks, lastSrcW, lastSrcH   // cached render blocks for stencil export
-let openLockPickerIdx  // cluster index the picker is editing, -1 if closed
-let compareSnapshot    // snapshot for the diff panel, or null
-let activeFallbackKeys // Set<paletteKey>
-let currentZoom, renderNativeW, renderNativeH  // zoom state
+imageLoaded, imageInfo      // { origW, origH, hasAlpha }; the analysis canvas holds the (downscaled) pixels
+previewUrl                  // object URL of #preview-img, revoked on replace
+rawClusters                 // Cluster[] | null
+analysisResult              // Result[] | null (index i ↔ rawClusters[i])
+renderMode, compareMode     // 'pixel' | 'vector' | 'spray'; compare forces pixel
+excludedIndices             // Set<clusterIdx>
+lockedOverrides             // Map<clusterIdx, Paint>
+lastBlocks, lastPaints, lastSrcW, lastSrcH   // last render, reused by stencil export
+compareSnapshot             // diff target or null
+activeFallbackKeys          // Set<paletteKey>
+needsFit                    // fit zoom on next render (new image only)
+analysisToken               // discards stale async analysis results
+currentZoom, renderNativeW/H
 ```
 
-UI inputs are also state and are read directly from the DOM when needed: `#paint-line` (select), `#color-count`, `#min-pct`, `#match-quality`, `#block-size`, `#wall-w/h/cov`.
+Inputs are read from the DOM when needed: `#paint-line`, `#color-count`, `#min-pct`, `#match-quality`, `#block-size`, `#wall-w/h/cov`.
 
-## Pipeline
+### Pipeline
 
-### 1. Load — `handleFile(file)`
-Object URL → `#preview-img` → drawn at natural size onto the hidden `analysis-canvas`. Reveals the UI and calls `runFullAnalysis()`.
+1. **Load**: `handleFile(file)` → `resetWorkspace()` → `loadImageSource(src)` draws the image onto `#analysis-canvas` scaled to ≤ `MAX_ANALYSIS_DIM` (1600) and detects transparency → `showWorkspace()` → `runFullAnalysis()`.
+2. **Cluster**: `runFullAnalysis()` clears locks and excludes, samples on the main thread, then `clusterAsync()` posts the samples to the worker. The worker is created lazily from `#core-lib`'s text as a blob URL. If workers fail, it falls back to the main thread. Errors go to `analysisFailed()`, which always hides the spinner.
+3. **Match**: `rematch()` builds `analysisResult`. A locked cluster takes its paint and ΔE to it. Otherwise `findClosestMontana(lab)` searches the primary line, then the active fallbacks if ΔE > `CA.matchPctToDelta(matchQuality)`. It then renders cards, layer order, wall calc, diff, and either `renderMontanaImage()` or, when there is no image, `showAttachPrompt()`.
+4. **Render**: `renderMontanaImage()` → `buildRenderBlocks()` averages each block's opaque pixels and snaps the average to the nearest active paint (CIEDE2000, cached per integer RGB) → mode dispatch:
+   - pixel: `fillRect` per merged rectangle
+   - vector: `<g fill><rect/>…</g>` per paint from merged rectangles
+   - spray: `renderMontanaSpray()`: seeded, dark → light, 4 radial blobs per block
+   - Zoom is kept unless `needsFit`.
+5. **Compare mode**: `enterCompareMode()` copies `#analysis-canvas` into `#compare-orig-canvas` and clips both around the slider position (`updateCompare()` on slider, scroll and zoom).
 
-### 2. Cluster — `runFullAnalysis()`
-- Clears `excludedIndices` and `lockedOverrides`.
-- `samplePixels(canvas, ctx, 6)` — every 6th pixel with alpha ≥ 128, as `[r,g,b]`.
-- `kMeans(pixels, k)` — k-means++ seeding, 20 fixed iterations, squared RGB distance. Returns clusters sorted by coverage.
-- Drops clusters below Min Coverage and **renormalises** the remaining `pct` to sum to ~100.
-- Stores `rawClusters`, then `rematch(true)`.
-- Runs on the main thread inside `setTimeout(…, 50)` so the spinner can paint first. Big images block the UI.
+### Derived outputs (all from `activePaints()`)
 
-### 3. Match — `rematch()`
-For each cluster index `i`:
-- If `lockedOverrides.has(i)` → use that paint, compute ΔE to it, `isLocked: true`.
-- Else `findClosestMontana(r,g,b)`:
-  - Linear scan of the primary palette for minimum CIE76 ΔE.
-  - If best ΔE > `matchPctToDelta(matchQuality)` (i.e. `(100 − q) / 2`; 70 % → ΔE 15) and fallback lines are active, scan them too and take the overall minimum.
-  - `matchPct = max(0, round(100 − 2·ΔE))`. `delta` is rounded to an integer.
-- Sets `isExcluded` from `excludedIndices`.
-Then re-renders everything: `renderResults`, `renderLayerOrder`, `calcWallCans`, `renderMontanaImage`, and `renderDiffPanel` if a snapshot exists.
+| Output | Function |
+|---|---|
+| Summary pills | `renderSummaryPills()` |
+| Card wall estimates | `cardCansText()` / `updateCardCans()` (per cluster area; cans for the whole paint; "same can as #n") |
+| Wall calculator | `calcWallCans()` |
+| Layer order | `layerOrder()` sorts by paint L\* (5-unit bands, then coverage); `renderLayerOrder()` |
+| CSV | `exportCSV()`: rows in layer order + total |
+| Palette PDF | `exportPalettePDF()`: new window, `document.write`, auto print |
+| Stencils | `exportStencils()`: `CA.mergeBlocks(lastBlocks)` grouped by paint id, in layer order |
+| Diff | `renderDiffPanel()`: join by paint id |
 
-### 4. Render preview — `renderMontanaImage()`
-- Palette = unique hexes of **non-excluded** results.
-- Tiles the source into `blockSize` squares; each block's average colour (opaque pixels only) is snapped to the nearest palette colour by ΔE. Result is `blocks[] = {bx, by, bw, bh, hex}`, cached in `lastBlocks` for stencils.
-- Mode dispatch:
-  - **pixel** → `fillRect` per block on `#montana-render-canvas` (CSS `image-rendering: pixelated`).
-  - **vector** → `<rect>` per block inside `<g fill=hex>` groups in `#montana-render-svg`.
-  - **spray** → `renderMontanaSpray`: blocks sorted dark→light by Lab L, 4 radial-gradient blobs per block with random jitter/radius/alpha/±4 RGB drift. Non-deterministic (`Math.random`).
-- Calls `fitZoom()` afterwards, so any render resets zoom to fit.
+### Sessions
+`doSaveSession()` writes v2 (see `DATA_MODEL.md`). `loadSessionFromJSON()` → `sanitizeSession()` validates everything, clamps numbers, resolves lock paints, and accepts only `data:image/(png|jpeg|webp)` images. It then restores the settings and calls `rematch()`, after loading the embedded image if there is one. Without an image, **ATTACH IMAGE** loads a picture without re-clustering, so locks stay valid. `loadCompareFromJSON()` reads only `analysisResult` from a file.
 
-### 5. Compare (before/after) mode
-`enterCompareMode()` forces pixel mode, draws the original image into `#compare-orig-canvas` at render size, and clips the render and the original with `clip-path: inset(...)` around a split position from `#compare-slider`. Recomputed on slider input, scroll, and zoom (`updateCompare`). Note there is an unused older `applyCompare()` next to it.
+### Event wiring cheat-sheet
 
-### 6. Derived panels
-- **Cards** — `renderResults()` rebuilds `#color-grid` via `innerHTML`, then wires copy / exclude / lock handlers via `querySelectorAll`. Summary pills above it.
-- **Can estimate on cards/CSV/PDF** — `max(1, ceil(pct / 10))`. A fixed heuristic, *not* tied to the wall calculator.
-- **Wall calculator** — `calcWallCans()`: `area × pct / coverage-per-can`, ceil per colour.
-- **Layer order** — `renderLayerOrder()`: sort by Lab L of the *paint* colour descending; if two colours are within 5 L of each other, higher coverage first. Role label: step 0 = Background, L>70 Light, L>40 Mid, pct<3 Detail, else Dark.
-- **Diff panel** — `renderDiffPanel()`: joins snapshot and current active results **by paint `code`**; statuses added / removed / changed (|Δpct| > 0.4) / same.
+| Input | Effect |
+|---|---|
+| file input / drop image | `handleFile` |
+| drop `.json` on upload zone | `loadSessionFromJSON` |
+| ANALYZE | `runFullAnalysis` |
+| `#paint-line`, `#match-quality`, fallback chip | `rematch` |
+| `#color-count`, `#min-pct` | label only |
+| `#block-size` | debounced `renderMontanaImage` |
+| mode buttons | `setRenderMode` / `enterCompareMode` |
+| card EXCLUDE / LOCK / UNLOCK | `toggleExclude` / `openLockPicker` / `unlockColor` → `rematch` |
+| wall inputs | `calcWallCans`, pills, card estimates |
+| Esc | close lock picker and session modal |
 
-### 7. Exports
-- **CSV** — `exportCSV()`, naive `join(',')` (no quoting). Includes excluded rows.
-- **Palette PDF** — `exportPalettePDF()` builds a standalone HTML doc string, `window.open` + `document.write`, auto-calls `print()`. Needs pop-ups allowed.
-- **SVG stencils** — `exportStencils()` groups `lastBlocks` by hex, one SVG per colour (white background + black `<rect>` per block), downloads staggered 300 ms apart.
-- **Session JSON** — `doSaveSession()` / `loadSessionFromJSON()`. Schema in `DATA_MODEL.md`.
-
-## Event wiring cheat-sheet
-
-| Input | Handler | Effect |
-|---|---|---|
-| file input / drop | `handleFile` | full analysis |
-| ANALYZE | `runFullAnalysis` | re-cluster, clears locks/excludes |
-| `#paint-line` change | inline | update labels, `buildFallbackChips`, `rematch` |
-| `#match-quality` input | inline | `rematch` |
-| fallback chip click | in `buildFallbackChips` | `rematch` |
-| `#color-count`, `#min-pct` input | inline | label only (needs ANALYZE) |
-| `#block-size` input | inline | `renderMontanaImage` |
-| mode buttons | inline | set `renderMode`, `renderMontanaImage` |
-| card EXCLUDE / LOCK | in `renderResults` | `toggleExclude` / `openLockPicker` / `unlockColor` → `rematch` |
-| wall inputs | `calcWallCans` | |
-| Esc | global keydown | closes lock picker |
-| ctrl/cmd + wheel, drag, pinch | zoom/pan handlers on `#render-viewport` | |
-
-## Mobile
-
-Mobile layout is pure CSS plus a hamburger drawer (`#mobile-drawer`) whose buttons proxy-click the desktop header buttons (`save-compare-btn`, `save-session-btn`, `export-btn`) or call `reset()`. `syncMobileDrawer(bool)` enables/disables them.
+### Mobile
+Pure CSS plus a hamburger drawer (`#mobile-drawer`). Its buttons call the same functions as the desktop buttons (`saveForCompare`, `openSaveSessionModal`, `sessionLoadInput.click()`, `exportCSV`, `reset`).

@@ -1,69 +1,42 @@
 # Known issues and tech debt
 
-Found while documenting the codebase in Sept 2026. Items marked **verified** were reproduced in headless Chromium. The others come from reading the code.
+## Open
 
-## Bugs
+### Behaviour
+- **Block size depends on the analysed resolution.** Images are downscaled to ≤ 1600 px, so "12 px blocks" are relative to that size, not the original photo. Stencil SVGs use the analysed size too. They're vector, so they scale cleanly, but the pixel dimensions differ from the original.
+- **ANALYZE clears locks and exclusions.** Intentional (they're keyed by cluster index), but it could surprise users. A future improvement could re-map locks to the nearest new cluster.
+- **Layer-order roles are heuristic** (L\* thresholds 70/40, "detail" < 3 % coverage). They don't take into account where colours sit in the image.
+- **Can estimates** assume one even coat over the colour's share of the wall. There's no allowance for overspray, outlines or multiple coats; users adjust the coverage-per-can field.
+- The Palette PDF uses `window.open` + `document.write` and needs pop-ups allowed.
+- Clipboard copy falls back to `execCommand('copy')` when the async clipboard API is unavailable; very old browsers may still refuse.
 
-### 1. Flat-colour images hang the analysis (verified)
-`kMeans` k-means++ seeding: once every distinct colour is already a centre, all distances are 0, so `total = 0`. The `while (r > 0)` loop never runs, `idx` stays 0, and `pixels[-1]` (`undefined`) is pushed as a centre. The next distance calculation throws `Cannot read properties of undefined (reading '0')` inside a `setTimeout`, and the spinner stays up forever.
-**Trigger:** any image with fewer distinct colours than Color Depth (logos, flat vector art, pixel art, or a stencil design with the default k = 12).
-**Fix:** stop seeding when `total === 0`, or cap `k` at the number of unique colours, and wrap the analysis in try/catch that hides the spinner and shows a toast.
+### Performance
+Measured in headless Chromium (software rendering) on a 12 MP photo, analysed at 1600×1200: full analysis ≈ 1.7 s at k = 12 and ≈ 2.6 s at k = 128. Render at block 12: pixel/vector ≈ 40 ms, spray ≈ 0.3 s. At block 4: pixel ≈ 0.1 s, vector ≈ 0.15 s, spray ≈ 1.8 s.
+- Rendering (block averaging and nearest-paint lookup) still runs on the main thread.
+- Spray mode at small block sizes is the slowest path (~480k sprite stamps at block 4).
 
-### 2. Excluded colours still count in the wall calculator and layer order (verified)
-`calcWallCans()` and `renderLayerOrder()` iterate the whole `analysisResult`, not `filter(r => !r.isExcluded)`. The README says exclusion removes a colour from both.
+### Tech debt
+- One 5.8k-line file (by owner decision). ~1,400 lines are palette data, ~2,200 are CSS.
+- Global mutable state in the app block; derived UI is rebuilt with `innerHTML`.
+- "Montana" naming leftovers (see `AGENTS.md`); `_type: 'montana-session'` must stay.
+- Many inline `style=""` attributes in the markup.
+- **Accessibility** (deliberately out of scope for now): colour cards and lock swatches are clickable `div`s without roles or keyboard support, sliders lack `<label for>`, small text (6.5–9 px) has low contrast, and nothing is announced to screen readers.
 
-### 3. Empty paint codes break code-keyed features (verified for the lock picker)
-169 catalogue entries have `code: ""`, including all of MTN Water Based and MTN Vice (see `PALETTES.md`).
-- **Lock picker** de-duplicates by `code`, so every empty-code colour after the first is dropped. It shows 1,130 of 1,336 colours, and Water Based and Vice are almost unreachable.
-- **Diff panel** joins by `code`, so different empty-code paints collide into one row.
-- **Stencil filenames** become `stencil_01_.svg`.
-- Duplicate *real* codes also exist (e.g. one in Montana BLACK).
+## Fixed (Sept 2026 overhaul)
 
-### 4. Session restore can't bring back the render, contrary to the README
-After Load Session, the upload zone is hidden and the header has no upload button. The only way back is NEW IMAGE, which calls `reset()` and wipes the session. Uploading an image also calls `runFullAnalysis()`, which clears locks and excludes and re-clusters with new random seeds, so the indices wouldn't line up anyway. The README says "re-upload the original image and click ANALYZE — all your locks and exclusions will still be in place". That does not work.
+For context when reading older history or sessions:
 
-### 5. Session file doesn't contain everything the README claims
-Wall calculator width/height/coverage and render mode are not saved or restored.
-
-### 6. Mobile drawer has no "Load Session"
-The README lists it; the drawer only has Save for Compare, Save Session, Export CSV, and New Image.
-
-### 7. Locked colours report the wrong source line
-`rematch()` uses `locked._lineName || getActiveLineName()`, but `_lineName` is never set. A colour locked to a Molotow paint while the primary line is Montana BLACK shows "Montana BLACK" in the CSV "Source Line" column.
-
-### 8. Duplicate paints are listed and costed twice
-Two clusters often map to the same can. Cards, CSV, the PDF, the wall calculator, and the can totals list that paint separately each time and round each one up. The render and stencils already merge by hex. A shopping list should aggregate by paint.
-
-### 9. Three different can estimates
-- Cards / CSV / PDF: `max(1, ceil(pct/10))`, a fixed heuristic unrelated to wall size.
-- Summary pill: `ceil(pct/10)` without the `max(1, …)`, so it can disagree with the sum of the cards.
-- Wall calculator: area-based.
-
-### 10. CSV isn't escaped
-Rows are `join(',')` without quoting. No current names contain commas, so this is safe today, but a new palette or a hand-edited session could break it. There's also no UTF-8 BOM, so Excel may garble the `ΔE` header.
-
-### 11. HTML injection from session files
-Names, codes, and labels from a loaded session or compare file are interpolated into `innerHTML` (cards, layer order, diff table, PDF). The README encourages sharing session files with collaborators, so a crafted file could run script in the page. Low impact because there is no backend or credentials, but it's cheap to escape.
-
-### 12. Minor
-- `URL.createObjectURL` is never revoked for downloads or uploaded images, so memory leaks over a long session.
-- `applyCompare()` is dead code (superseded by `updateCompare()`).
-- `renderLockPickerGrid` highlights the current colour by exact hex string match; mixed-case hex between lines can miss it.
-- Spray render uses `Math.random`, so each re-render (slider move, exclusion) looks different. The code comment mentions seeding but none is implemented.
-- Every `renderMontanaImage()` calls `fitZoom()`, so tweaking block size or excluding a colour throws away the user's zoom level.
-- Clipboard copy has no fallback for non-secure contexts (`file://` works in most browsers, but some block `navigator.clipboard`).
-
-## Performance
-
-- All work runs on the main thread. `colorDistance` converts **both** colours to Lab on every call, so the palette is re-converted for every cluster (fine) and for every render block × palette colour (not fine).
-- `renderMontanaImage` processes the image at **full resolution**. A 24 MP phone photo at block size 4 is about 1.5 M blocks × up to 128 palette colours × 2 Lab conversions, which takes many seconds and freezes the tab. The vector mode then creates the same number of DOM `<rect>`s, and each stencil SVG gets one `<rect>` per block.
-- k-means uses `pixels.map` with arrays of arrays and runs 20 fixed iterations with no convergence check.
-
-## Tech debt / structure
-
-- One 5.5k-line file. ~1,400 lines are palette data, ~2,200 are CSS.
-- Global mutable state everywhere; derived UI is rebuilt wholesale via `innerHTML`.
-- The "Montana" naming is a leftover from the single-brand origin (see `AGENTS.md`).
-- Many inline `style=""` attributes in the markup and in generated HTML.
-- No tests and no CI.
-- Accessibility: the colour cards and lock picker swatches are clickable `div`s without roles or keyboard support, the sliders have no associated `<label for>`, and small text (6.5–9 px) has low contrast.
+| Was | Now |
+|---|---|
+| Images with fewer distinct colours than Color Depth hung the spinner forever (k-means++ picked `pixels[-1]`). | `kMeans` stops seeding when all points are covered; failures always hide the spinner and show a toast. |
+| Excluded colours still counted in wall calc and layer order. | All outputs use `activePaints()`. |
+| 169 paints have empty codes; the lock picker de-duplicated by code (showed 1,130 of 1,336), the diff collided rows, stencils were named `stencil_01_.svg`. | Paints keyed by `id` (`line|code||name`); the picker shows all 1,335 and searches by line and hex. |
+| Montana BLACK listed "Outline Silver" twice. | Duplicate removed (187 colours). |
+| Locked colours reported the primary line as their source. | Paints carry `line`; the lock tag shows the real line. |
+| The same paint was listed and costed once per cluster; three different can formulas disagreed. | Shopping-list outputs aggregate per paint; one wall-based formula everywhere. |
+| CSV unquoted, no BOM, included excluded colours. | RFC 4180 quoting, BOM, one row per paint in spray order, total row. |
+| Session file values injected into `innerHTML` (script injection via shared sessions). | `sanitizeSession()` validates; all data-derived text is escaped. |
+| Session restore couldn't bring the render back; wall and render mode weren't saved; the mobile menu had no Load Session. | v2 sessions embed the image and all settings; ATTACH IMAGE for image-less sessions; drawer has Load Session; `.json` can be dropped on the upload zone. |
+| CIE76 matching, RGB k-means, non-deterministic results. | CIEDE2000 matching, Lab k-means, seeded RNG (same image + settings → same result). |
+| Full-resolution processing on the main thread froze the tab on big photos; one `<rect>` per block in vector mode and stencils. | ≤ 1600 px analysis, ≤ 60k samples, clustering in a Web Worker, cached nearest-paint lookups, merged rectangles. |
+| Every re-render reset zoom; spray looked different on every re-render; object URLs leaked; Esc didn't close the save dialog; mobile save dialog's Cancel button touched the screen edge. | All fixed. |

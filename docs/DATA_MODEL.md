@@ -1,92 +1,106 @@
 # Data model
 
-## PaintColor (catalogue entry)
+## Paint (catalogue entry)
 
+Source form in `palette-data`:
 ```js
 { code: "BLK 1010", name: "Easter Yellow", hex: "#FFED52" }
 ```
-- `code` may be an **empty string** for some lines (see `PALETTES.md`).
-- `hex` is `#RRGGBB`; case is inconsistent between lines (upper in Montana, lower in Molotow/Loop/Vice). Compare hex values case-insensitively if you add new logic.
-- Code references `locked._lineName`, but no catalogue entry sets it, so it is always `undefined`.
+After startup normalisation (app block):
+```js
+{ code, name, hex /* uppercased */, line: "BLACK" /* palette key */ }
+// + non-enumerable: id = "BLACK|BLK 1010" (line|code, or line|name when code is ""), lab = [L, a, b]
+```
+Only the enumerable fields end up in JSON. `resolvePaint()` turns a JSON paint back into the catalogue object.
 
 ## Cluster (`rawClusters[i]`)
 
-Produced by `kMeans`, then filtered and renormalised in `runFullAnalysis`:
-
 ```js
-{ rgb: [r, g, b],     // integer centroid
-  hex: "#RRGGBB",     // uppercase
-  pct: "12.3" }       // STRING, percent of sampled opaque pixels, renormalised after min-coverage filter
+{ rgb: [r, g, b],        // mean RGB of member pixels (integers)
+  hex: "#RRGGBB",        // uppercase, from rgb
+  lab: [L, a, b],        // Lab centroid (2 decimals); v1 sessions lack it → derived from rgb
+  pct: "12.3" }          // STRING, % of sampled opaque pixels after min-coverage filter + renormalise
 ```
-
-Sorted by `pct` descending. **The array index is the identity** used by locks and exclusions.
+Sorted by coverage. **The array index is the identity** used by locks and exclusions.
 
 ## Result (`analysisResult[i]`)
 
-Cluster fields plus:
-
 ```js
 { ...cluster,
-  montana: PaintColor,   // matched (or locked) paint — "montana" is a legacy name, any brand
-  delta: 7,              // CIE76 ΔE, rounded integer
-  matchPct: 86,          // max(0, round(100 − 2·ΔE))
-  lineName: "MTN 94",    // display name of the line the paint came from
-  lineKey: "MTN94",      // PALETTES key
-  isFallback: false,     // true if matched from a fallback line (never true when locked)
+  index: i,
+  montana: Paint,       // matched or locked paint ("montana" = legacy name, any brand)
+  delta: 3.4,           // CIEDE2000, 1 decimal
+  matchPct: 86,         // max(0, round(100 − 4·ΔE))
+  lineName: "MTN 94",   // display name of the paint's line
+  lineKey: "MTN94",
+  isFallback: false,    // matched from a fallback line (false when locked)
   isLocked: false,
   isExcluded: false }
 ```
 
-`analysisResult[i]` always corresponds to `rawClusters[i]`.
+## Paint aggregate (`activePaints()[i]`, from `CA.aggregateByPaint`)
+
+```js
+{ id, paint, lineName, pct /* number, summed */, bestDelta, imageHexes: [], indices: [clusterIdx…], isFallback, isLocked }
+```
+Excluded clusters are not included. This is the unit for shopping lists, cans, layer order, stencils and the diff.
 
 ## Palette keys
 
-`BLACK, GOLD, MTN94, HARDCORE, WATERBASED, NITRO2G, VICE, MOLOTOW, LOOP` — used in `PALETTES`, `LINE_NAMES`, the `<select id="paint-line">` option values, `activeFallbackKeys`, and saved sessions. Treat them as a stable, persisted enum.
+`BLACK, GOLD, MTN94, HARDCORE, WATERBASED, NITRO2G, VICE, MOLOTOW, LOOP`. Used in `PALETTES`, `LINE_NAMES`, `<select id="paint-line">`, fallback state, paint ids and sessions. Persisted: never rename.
 
-## Session file (`montana_session_<name>.json`)
+## Session file
 
-Written by `doSaveSession()`, read by `loadSessionFromJSON()` and (for comparison) `loadCompareFromJSON()`.
+Written by `doSaveSession()` as `color-analyzer_session_<name>.json`. Read by `loadSessionFromJSON()` (via `sanitizeSession()`) and `loadCompareFromJSON()`.
+
+### v2 (current)
 
 ```jsonc
 {
-  "_version": 1,
-  "_type": "montana-session",        // required; loaders reject anything else
-  "name": "Montana BLACK — 26 Feb 2026",
-  "savedAt": "2026-02-26T17:00:00.000Z",
-  "paintLine": "BLACK",              // palette key
-  "colorCount": "12",                // slider values are saved as strings
-  "minPct": "1",
-  "matchQuality": "70",
-  "blockSize": "12",
+  "_version": 2,
+  "_type": "montana-session",          // required, never change
+  "name": "Montana BLACK — 26 Sept 2026",
+  "savedAt": "2026-09-26T12:00:00.000Z",
+  "paintLine": "BLACK",
+  "colorCount": "12", "minPct": "1", "matchQuality": "70", "blockSize": "12",   // strings (input values)
+  "renderMode": "pixel",               // pixel | vector | spray | compare
+  "wall": { "width": "5", "height": "3", "coverage": "1.5" },
   "fallbackKeys": ["MOLOTOW"],
   "rawClusters": [ /* Cluster[] */ ],
   "excludedIndices": [3],
-  "lockedOverrides": [ { "idx": 2, "color": { "code": "...", "name": "...", "hex": "#..." } } ],
-  "analysisResult": [ /* Result[] */ ]
+  "lockedOverrides": [ { "idx": 2, "color": { "code": "...", "name": "...", "hex": "#...", "line": "LOOP" } } ],
+  "analysisResult": [ /* Result[]: kept for "compare from file" and older tools; recomputed on load */ ],
+  "image": {                           // or null when "Include image" is unticked
+    "dataUrl": "data:image/jpeg;base64,…",   // PNG when the image has transparency
+    "width": 1600, "height": 1200,           // analysed (downscaled) size
+    "origWidth": 4000, "origHeight": 3000
+  }
 }
 ```
 
-Not saved, although `README.md` says otherwise: wall calculator dimensions / coverage, render mode. The source image is never saved, so a loaded session has no render preview.
+### v1 (legacy, still loadable)
 
-Restoring only rehydrates UI state; it does **not** call `rematch()`, so `analysisResult` is shown exactly as saved.
+The same fields without `renderMode`, `wall`, `image` and cluster `lab`. `delta` values in v1 files are CIE76 integers. They are ignored because `rematch()` recomputes everything with CIEDE2000 on load. Lock colours have no `line` and are resolved by hex + name.
 
-Compatibility rule: anything that changes these field names, the `_type` string, or the palette keys must keep loading older files (bump `_version` and migrate in `loadSessionFromJSON`).
+### Loading rules (`sanitizeSession`)
 
-## Compare snapshot (in memory only)
+- Rejects files without `_type: 'montana-session'` or with no usable `rawClusters`.
+- Clamps all numbers to their slider ranges and recomputes cluster `hex` from `rgb`.
+- Drops lock and exclusion indices that are out of range, and locks whose paint can't be resolved or has an invalid hex.
+- Accepts only `data:image/(png|jpeg|webp);base64,` images.
+- Everything displayed from the file is escaped. Treat session files as untrusted input.
+
+Compatibility rule: any change to the format must keep v1 and v2 files loading. Bump `_version` and handle the difference in `sanitizeSession()`.
+
+## Compare snapshot (in memory)
 
 ```js
-compareSnapshot = {
-  label: "Montana BLACK · 11 colors",
-  paintLine: "BLACK",
-  savedAt: "18:42",                 // display string
-  results: [ { hex, code, name, imgHex, pct /* number */, delta } ]   // non-excluded only
-}
+compareSnapshot = { label, paintLine, savedAt, results: [ { id, hex, code, name, pct /* number */, delta } ] }
 ```
-
-Built by `saveForCompare()` from the live analysis or by `loadCompareFromJSON()` from a session file. The diff joins on `code`.
+One row per paint (aggregated). Built by `saveForCompare()` or `loadCompareFromJSON()`, joined on `id`.
 
 ## Render block (`lastBlocks[i]`)
 
 ```js
-{ bx, by, bw, bh, hex }   // source-pixel coordinates, snapped paint hex
+{ bx, by, bw, bh, key /* paint id */, hex }   // analysis-canvas pixel coordinates
 ```

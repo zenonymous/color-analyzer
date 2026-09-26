@@ -1,6 +1,6 @@
 # Color Analyzer · Spray Can Calculator
 
-A single-file browser tool for mapping any image to a real spray paint catalogue. Drop in a photo or piece of artwork, and the tool clusters the colors using k-means, finds the closest can in your chosen paint line, and gives you a full plan: render preview, shopping list, stencil files, layer order, and wall coverage estimates.
+A single-file browser tool for mapping any image to a real spray paint catalogue. Drop in a photo or piece of artwork. The tool groups the image's colours with k-means clustering, finds the closest can in your chosen paint line, and gives you a full plan: render preview, shopping list, stencil files, layer order, and wall coverage estimates.
 
 No install. No server. No account. Open the `.html` file in any modern browser and go.
 
@@ -8,11 +8,11 @@ No install. No server. No account. Open the `.html` file in any modern browser a
 
 ## Supported Paint Lines
 
-Nine catalogues are built in:
+Nine catalogues are built in (1,335 colours in total):
 
 | Brand | Line | Colors |
 |---|---|---|
-| Montana Cans | Montana BLACK | 188 |
+| Montana Cans | Montana BLACK | 187 |
 | Montana Cans | Montana GOLD | 199 |
 | MTN Colors | MTN 94 | 217 |
 | MTN Colors | MTN Hardcore | 141 |
@@ -22,18 +22,22 @@ Nine catalogues are built in:
 | Molotow | Molotow Premium | 231 |
 | Loop Colors | Loop Colors | 209 |
 
-Colors are matched using **CIE76 ΔE** — perceptual color distance in Lab space — so matches are based on how human eyes perceive color difference, not raw RGB math.
+Colours are matched with **CIEDE2000 ΔE**, the industry-standard measure of how different two colours look to the human eye. It is more accurate than plain RGB distance and older ΔE formulas, especially for blues, greys and saturated colours. The image is also clustered in the perceptual Lab colour space, so the colours it picks out are the ones you actually see.
+
+Screen colours are approximations of physical paint. Always check against a real colour chart before buying a large order.
 
 ---
 
 ## Getting Started
 
-1. Open `color-analyzer.html` in any modern browser (Chrome, Firefox, Safari, Edge)
-2. Drop an image onto the upload zone or click **CHOOSE FILE**
-3. The tool runs color clustering and palette matching automatically
-4. Adjust any slider and results update in real time
+1. Open `color-analyzer.html` in any modern browser (Chrome, Firefox, Safari, Edge), or use the hosted GitHub Pages version.
+2. Drop an image onto the upload zone or click **CHOOSE FILE**.
+3. The tool runs colour clustering and palette matching automatically.
+4. Adjust any slider and the results update.
 
-To restore previous work, click **LOAD SAVED SESSION** on the upload screen and open a `.json` session file.
+To restore previous work, click **LOAD SAVED SESSION** on the upload screen (or drop a session `.json` onto the upload zone).
+
+Large photos are scaled down so their longest side is 1600 px before analysis. This keeps things fast, and the size shown in the source panel tells you when it happened. The same image with the same settings always produces the same result.
 
 ---
 
@@ -41,188 +45,158 @@ To restore previous work, click **LOAD SAVED SESSION** on the upload screen and 
 
 These four controls sit in the bar below the header and determine how the analysis runs.
 
-**Paint Line** — the primary catalogue to match against. All nine lines are available. Switching lines immediately remaps all clusters without re-running k-means. Locks and exclusions survive line changes.
+**Paint Line**: the primary catalogue to match against. Switching lines immediately remaps all colours without re-clustering. Locks and exclusions survive line changes.
 
-**Color Depth** (4–128) — the number of k-means clusters to find. Higher values capture subtle color variation; lower values give a simpler, more graphic result. Requires clicking **ANALYZE** to re-run clustering.
+**Color Depth** (4–128): the number of colours (k-means clusters) to find. Higher values capture subtle variation; lower values give a simpler, more graphic result. Requires clicking **ANALYZE**. If the image has fewer distinct colours than this (a logo or flat artwork, for example), you get one card per colour and a notice.
 
-**Min Coverage** (0–5%) — filters out any color that appears in less than this percentage of the image. Useful for eliminating noise or irrelevant background tones. Requires **ANALYZE** to take effect.
+**Min Coverage** (0–5%): drops any colour that covers less than this percentage of the image. Useful for removing noise. Requires **ANALYZE**.
 
-**Match Quality** (50–100%) — sets the ΔE threshold for fallback matching. When the best match in the primary line falls below this quality level, the tool searches any active fallback lines for a closer match. Updates instantly without re-clustering.
+**Match Quality** (50–100%): when the best match in the primary line scores below this, the tool also searches the active fallback lines. Match % is `100 − 4 × ΔE`, so the default 70% means "look further if ΔE is above 7.5". Updates instantly.
 
 ### Fallback Lines
 
-The **Fallback Lines** bar sits directly below the controls. Toggle any additional paint line to include it as a fallback. When a cluster's best primary match falls below the Match Quality threshold, the tool searches all active fallback lines and uses whichever gives the lowest ΔE. Colors sourced from a fallback line are flagged on their card with the line name in amber.
+The **Fallback Lines** bar sits directly below the controls. Toggle any other paint line to use it as a fallback. When a colour's best primary match is below the Match Quality threshold, the tool searches all active fallback lines and uses whichever match is closest. Colours sourced from a fallback line are flagged on their card with the line name in amber.
 
 ---
 
 ## Render Preview
 
-After analysis, the right panel shows the image remapped to the matched palette. Four render modes are available via the toolbar buttons above the render:
+After analysis, the right panel shows the image repainted with the matched paints. Four render modes are available:
 
-**PIXEL** — flat hard-edged mosaic. Each block in the image is filled with a solid color from the matched palette. The Block Size slider controls how large each block is.
+**PIXEL**: flat, hard-edged mosaic. The Block Size slider controls how large each block is (in pixels of the analysed image).
 
-**VECTOR** — same layout as pixel mode but rendered as SVG instead of canvas. Fully scalable — suitable for exporting to plotters or large-format print.
+**VECTOR**: the same layout rendered as SVG. Neighbouring blocks of the same paint are merged into larger rectangles, which keeps it light and scalable.
 
-**SPRAY** — simulated aerosol render. Each block is painted with multiple overlapping radial gradient blobs with randomised jitter, radius variation, opacity variation, and slight hue drift. Blobs are composited dark-to-light to mimic real spray layering technique. The Block Size slider controls the spray blob radius.
+**SPRAY**: simulated aerosol render. Each block is painted with overlapping soft blobs, composited dark to light to mimic real spray layering. The look stays stable while you tweak other settings.
 
-**COMPARE** — split-screen reveal. A slider appears and lets you drag a vertical divider across the panel: left of the line shows the original image, right shows the render. Useful for checking how faithfully colors are being matched and how much the abstraction changes the image.
+**COMPARE**: split-screen reveal. Drag the slider to move the divider between the render and the original image.
 
 ### Zoom and Pan
 
-The zoom toolbar (−, %, +, **FIT**) lets you inspect detail at any scale. Steps run from 25% to 800%.
+The zoom toolbar (−, %, +, **FIT**) runs from 25% to 800%. Your zoom level is kept when you change block size, exclude colours or switch modes.
 
 - **Mouse:** Ctrl/Cmd + scroll wheel to zoom, click and drag to pan
 - **Trackpad:** pinch to zoom, two-finger drag to pan
 - **Touch:** pinch two fingers to zoom, one finger to pan
 
-**FIT** snaps the render back to fill the viewport.
-
 ---
 
 ## Color Cards
 
-Every matched cluster gets a card in the results grid. Each card shows:
+Every colour found in the image gets a numbered card. Each card shows:
 
-- **Swatch pair** — the original sampled image color (top) and the matched paint color (bottom), side by side
-- **Paint name and code** — e.g. *Easter Yellow · BLK 1010*
-- **Hex values** — tap/click either chip to copy to clipboard
-- **ΔE badge** — the perceptual color distance with a quality rating: ✓ CLOSE (ΔE < 10), ~ FAIR (ΔE 10–20), ✗ ROUGH (ΔE > 20)
-- **Coverage bar** — the percentage of the image this cluster represents
-- **Can estimate** — approximate number of 400 ml cans for typical mural coverage
-- **Fallback tag** — if the match came from a fallback line, shown in amber with the line name
+- **Swatch pair**: the sampled image colour (top) and the matched paint (bottom)
+- **Paint name and code**: e.g. *Easter Yellow · BLK 1010*. Lines without product codes (MTN Water Based, MTN Vice, some MTN 94/Hardcore colours) show the line name instead
+- **Hex values**: tap or click either chip to copy
+- **ΔE badge**: CIEDE2000 distance and match %: ✓ CLOSE (ΔE < 5), ~ FAIR (ΔE 5–10), ✗ ROUGH (ΔE ≥ 10)
+- **Coverage bar**: the share of the image this colour covers
+- **Wall estimate**: the area it covers on your wall, and how many cans of that paint you need (see Wall Size Calculator)
+- **Same can as #n**: shown when several image colours map to the same paint. They share one shopping-list line
+- **Fallback tag**: shown in amber with the line name when the match came from a fallback line
 
 ### Exclude Color
 
-Click **✕ EXCLUDE** on any card to remove that color from the render, the layer order, the wall calculator, and any stencil exports. The card is visually dimmed with a strikethrough name. Click **↩ RESTORE** to bring it back.
-
-Useful for surfaces where you want to represent bare concrete, primer, or an existing background color without spraying it.
+Click **✕ EXCLUDE** to remove a colour from the render, layer order, wall calculator, shopping list, palette PDF and stencils. The card is dimmed and shows how much wall is left unpainted. Useful for bare concrete, primer or an existing background. Click **↩ RESTORE** to bring it back.
 
 ### Lock Color
 
-Click **🔒 LOCK COLOR** to override the algorithm's choice for that cluster and pin it to any specific color in any catalogue.
+Click **🔒 LOCK COLOR** to override the automatic choice and pin a colour to any paint in any catalogue.
 
-A full-palette picker opens showing all colors across all nine lines. Type in the search box to filter by color name or code. Click any swatch to apply the lock. The render, layer order, and exports all update immediately.
+The picker shows all 1,335 paints, primary line first. Search by name, code, line name (e.g. "vice") or hex. Click a swatch to apply the lock. The card shows the line the locked paint comes from.
 
-Locks survive paint line changes, match quality changes, and fallback changes. They are only cleared when you click **ANALYZE** to re-run the full analysis. Click **🔓 UNLOCK** to release a lock.
+Locks survive paint line, match quality and fallback changes, and are saved in sessions. They are cleared when you click **ANALYZE** to re-run the analysis. Click **🔓 UNLOCK** to release a lock.
 
 ---
 
 ## Wall Size Calculator
 
-A collapsible panel in the results section. Enter the wall width and height in metres and an optional coverage rate (default 1.5 m² per 400 ml can). The calculator outputs:
+Enter the wall width and height in metres and a coverage rate (default 1.5 m² per 400 ml can). The calculator shows the total area, the total can count and a per-paint breakdown.
 
-- Total wall area
-- Total estimated can count
-- Per-color breakdown showing how many cans of each paint you need based on its coverage percentage
+**All can counts in the app come from this calculator**: the summary pill, the cards, the CSV and the palette PDF. Every paint you use counts as at least one can. Change the wall size and every estimate updates.
 
-Adjust the Coverage/Can value to match your technique — thin coats on smooth concrete may reach 2 m², heavy opaque fill on rough brick closer to 0.8 m².
+Adjust Coverage/Can to your technique: thin coats on smooth concrete may reach 2 m², heavy opaque fill on rough brick closer to 0.8 m².
 
 ---
 
 ## Layer Order / Spray Sequence
 
-A collapsible panel showing the recommended spray order for your palette. Colors are sorted by Lab lightness (L value) from lightest to darkest, with higher-coverage colors prioritised within each band. This matches standard spray mural technique: establish broad light areas first, build through mid-tones, finish with dark shadows and fine details.
-
-Each step shows: step number, color swatch, paint name, code, coverage percentage, L value, and a role badge.
+A collapsible panel showing the recommended spray order, one step per paint. Paints are sorted by lightness, lightest first. Paints with similar lightness are ordered by coverage, largest first. This matches standard mural technique: establish broad light areas first, build through mid-tones, and finish with dark shadows and details.
 
 | Badge | Meaning |
 |---|---|
-| Background | Lightest and/or widest color — spray first |
-| Light layer | Pale colors that establish the base tone |
-| Mid layer | Mid-tone fill colors |
+| Background | First and lightest/widest paint |
+| Light layer | Pale colours that establish the base tone |
+| Mid layer | Mid-tone fill colours |
 | Dark layer | Shadows and deep tones |
-| Detail | Low-coverage accent colors — spray last |
+| Detail | Low-coverage dark accents, spray last |
 
 ---
 
 ## Analysis Comparison / Diff
 
-Useful for comparing two analyses — different images, different settings, or different paint lines — and seeing exactly what changed.
+Compare two analyses (different images, settings or paint lines) and see exactly which paints changed.
 
-### Saving a snapshot
+- **SAVE FOR COMPARE** (header) snapshots the current palette. Run another analysis and the **Analysis Comparison** panel appears.
+- **COMPARE FROM FILE** (export bar) uses a saved session `.json` as the comparison target.
 
-After running an analysis, click **SAVE FOR COMPARE** in the header. This snapshots the current active palette in memory. Run a new analysis (change settings, upload a different image, switch paint lines) and a **Analysis Comparison** panel automatically appears at the bottom of the results.
-
-### Loading a snapshot from file
-
-Click **COMPARE FROM FILE** in the export bar to load any previously saved `.json` session file as the comparison target. Useful for comparing work across sessions, or sharing a reference palette with a collaborator.
-
-### Reading the diff
-
-The comparison panel shows a table of every color from both analyses, sorted by status:
-
-| Row color | Meaning |
+| Row | Meaning |
 |---|---|
-| 🟢 Green | Color is new in the current analysis |
-| 🟡 Amber | Color exists in both but coverage changed by > 0.4% |
-| Normal | Color is present in both with similar coverage |
-| 🔴 Red / dimmed | Color was in the snapshot but is not in the current analysis |
-
-Columns show the snapshot percentage, current percentage, and the Δ coverage change. Click the panel header to collapse it, or the **CLEAR ✕** button to dismiss it.
+| 🟢 Green | Paint is new in the current analysis |
+| 🟡 Amber | Paint in both, coverage changed by > 0.4% |
+| Normal | Paint in both with similar coverage |
+| 🔴 Red / dimmed | Paint was in the snapshot but not now |
 
 ---
 
 ## Save Session / Load Session
 
-Sessions let you save the full state of your work to a `.json` file and reload it later — without re-uploading the image or re-running the analysis.
+Save the full state of your work to a `.json` file and pick it up later, or share it with another artist.
 
 ### What gets saved
 
-- All color matches and their ΔE scores
-- Raw k-means cluster data
-- Which colors are excluded
-- Which colors are locked and to which specific paint
-- Paint line, active fallback lines, and all slider values
+- The analysed colours, matches, exclusions and locks
+- Paint line, fallback lines and all slider values
 - Wall calculator dimensions and coverage rate
 - Block size and render mode
+- **The image itself** (optional, on by default), so the render comes back on load. Untick "Include image" for a much smaller file.
 
 ### Saving
 
-Click **SAVE SESSION** in the header. A modal opens where you can give the session a name (pre-filled with the paint line and current date). Click **DOWNLOAD .JSON** to save the file.
-
-On mobile, tap the **☰** menu button in the top-right corner to access Save Session.
+Click **SAVE SESSION** in the header (on mobile: **☰ → SAVE SESSION**), name it, and click **DOWNLOAD .JSON**.
 
 ### Loading
 
-Click **LOAD SAVED SESSION** on the upload screen to open a session file and restore your work. All color cards, the layer order, wall calculator, locks, and exclusions restore instantly. To get the render preview back, re-upload the original image and click **ANALYZE** — all your locks and exclusions will still be in place.
+Click **LOAD SAVED SESSION** on the upload screen, drop the file on the upload zone, or use **☰ → LOAD SESSION** on mobile. Everything is restored, including the render if the image was saved.
+
+If the session has no image (including files saved by older versions of this tool), the render panel shows **ATTACH IMAGE**. Choose the original image and the render appears, with your locks and exclusions kept.
 
 ---
 
 ## Export Options
 
-All export buttons are in the **Export & Share** bar at the bottom of the results section.
+All export buttons are in the **Export & Share** bar at the bottom of the results.
 
-### CSV
+### CSV shopping list
 
-**EXPORT CSV** downloads a spreadsheet with one row per color:
+**EXPORT CSV** downloads one row per paint, in spray order, without excluded colours:
 
-`Montana Code · Montana Name · Montana Hex · Image Hex · Coverage % · ΔE · Match % · Source Line · Est. Cans`
+`Step · Line · Code · Name · Paint Hex · Image Hex · Coverage % · Wall Area m² · Cans (400ml) · Best ΔE2000 · Match % · Fallback · Locked`
 
-Also available from the header bar (desktop).
+plus a total row for the wall. Opens cleanly in Excel, Numbers and Google Sheets.
 
 ### Palette PDF
 
-**PALETTE PDF** opens a print-formatted page in a new browser tab and triggers the print dialog automatically. The page contains:
-
-- A branded header with paint line name, date, total color count, and total can estimate
-- A summary row with at-a-glance stats
-- A grid of color cards — each showing both swatches, paint name and code, hex values, a coverage bar, ΔE badge, and can estimate
-
-Save as PDF from your browser's print dialog, or send to a physical printer. Uses only web-safe fonts and no external dependencies.
+**PALETTE PDF** opens a print-formatted page in a new tab and starts the print dialog. It shows the paint line, date, paint count and can total for your wall, followed by one card per paint in spray order. Save as PDF from the print dialog or print it.
 
 > **Note:** Allow pop-ups for this page if your browser blocks them.
 
 ### SVG Stencils
 
-**EXPORT STENCILS** generates one SVG mask file per active (non-excluded) color. Each file is a black-on-white mask: black rectangles mark exactly where that color appears in the render at the current block size, white is the masked-off area.
+**EXPORT STENCILS** generates one SVG mask per paint, numbered in spray order (`stencil_01_BLK_1025.svg`, …). Black marks where that paint goes, white is masked off. Adjacent blocks are merged into larger shapes, so files are small and cut cleanly.
 
-Files download sequentially at 300 ms intervals to avoid browser blocking. They are named `stencil_01_BLK_1025.svg`, `stencil_02_BLK_9001.svg` etc. in layer order.
+The SVGs import directly into vinyl cutter software (Cricut Design Space, Roland CutStudio, Silhouette Studio), laser cutter software (LightBurn, RDWorks), print-and-cut workflows, and Illustrator or Inkscape.
 
-The SVGs are ready to import directly into:
-- Vinyl cutter software (Cricut Design Space, Roland CutStudio, Silhouette Studio)
-- Laser cutter software (LightBurn, RDWorks)
-- Print-and-cut workflows
-- Illustrator or Inkscape for further editing
+Files download 300 ms apart; some browsers ask once for permission to download multiple files.
 
 ---
 
@@ -230,14 +204,13 @@ The SVGs are ready to import directly into:
 
 The tool is fully functional on phones and tablets.
 
-On screens narrower than 540 px:
-- The header actions collapse into a **☰ menu** (top-right). Tap it to access Save Session, Export CSV, Save for Compare, Load Session, and New Image
-- The controls bar stacks into a vertical list with full-width sliders
-- The render mode buttons (PIXEL / VECTOR / SPRAY / COMPARE) span the full panel width
-- Color cards display in a single column
-- The Save Session modal and lock color picker slide up as bottom sheets
-- Touch pan (one finger) and pinch-to-zoom (two fingers) work on the render viewport
-- All interactive elements are at least 44 px tall for comfortable tapping
+On narrow screens:
+- Header actions move into the **☰ menu**: Save for Compare, Save Session, Load Session, Export CSV and New Image
+- Controls stack vertically with full-width sliders
+- Colour cards display in a single column
+- The Save Session dialog and lock picker slide up as bottom sheets
+- One-finger pan and two-finger pinch zoom work on the render
+- Interactive elements are at least 44 px tall
 
 ---
 
@@ -245,41 +218,38 @@ On screens narrower than 540 px:
 
 | Action | Shortcut |
 |---|---|
-| Zoom in on render | Ctrl / Cmd + scroll up |
-| Zoom out on render | Ctrl / Cmd + scroll down |
-| Fit render to viewport | Click **FIT** button |
+| Zoom in / out on render | Ctrl / Cmd + scroll |
+| Fit render to viewport | **FIT** button |
 | Copy hex value | Click the hex chip on any card |
-| Close lock color picker | Esc |
+| Close lock picker or save dialog | Esc |
 | Confirm session name | Enter |
-| Close session modal | Esc or click outside |
-| Close mobile menu | Tap outside the drawer |
 
 ---
 
 ## Browser Compatibility
 
-Works in all modern browsers. Requires Canvas 2D and File API support.
+Works in all modern browsers with Canvas 2D, File API and Web Workers.
 
 | Browser | Status |
 |---|---|
-| Chrome / Edge 88+ | ✓ Full support |
-| Firefox 85+ | ✓ Full support |
-| Safari 14+ | ✓ Full support |
-| iOS Safari 14+ | ✓ Full support |
+| Chrome / Edge 90+ | ✓ Full support |
+| Firefox 90+ | ✓ Full support |
+| Safari 15+ | ✓ Full support |
+| iOS Safari 15+ | ✓ Full support |
 | Chrome for Android | ✓ Full support |
 
-The Palette PDF export requires pop-ups to be allowed for the page. The SVG Stencil export triggers multiple sequential downloads — some browsers may show a one-time permission prompt.
+Analysis runs in a background worker so the page stays responsive. If a browser blocks that (some do when opening the file straight from disk), it falls back to running on the page.
 
 ---
 
 ## File Structure
 
-The entire tool ships as a single `.html` file with no external dependencies except the Google Fonts import for Bebas Neue and Space Mono. It can be opened directly from a local filesystem, hosted on any static server, or shared as an email attachment.
+The whole tool is the single file `color-analyzer.html`, with no dependencies except the Google Fonts import for Bebas Neue and Space Mono. It can be opened from disk, hosted on any static server (such as GitHub Pages), or emailed.
 
-Session files (`.json`) are plain text and can be opened and inspected in any text editor.
+Session files (`.json`) are plain text. Only load session files from people you trust. The tool treats their contents as data and never runs them as code.
 
 ---
 
 ## For Developers
 
-See [`AGENTS.md`](AGENTS.md) for a codebase orientation, and the [`docs/`](docs/) folder for architecture, data formats, palette maintenance, development/QA, and known issues.
+See [`AGENTS.md`](AGENTS.md) for a codebase orientation, and the [`docs/`](docs/) folder for architecture, data formats, palette maintenance, development/QA, and known issues. Run the tests with `npm install && npm test`.
